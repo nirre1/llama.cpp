@@ -21,7 +21,7 @@ cmake --install build
 The installed server still leaves the graph unloaded until runtime configuration turns it on:
 
 1. Build: `LLAMA_SMART_CONTEXT` defaults to ON for this fork. OFF compiles the calls out.
-2. Run: `--smart-context` loads the graph in a model server. `--no-smart-context` leaves it unloaded.
+2. Run: `--smart-context` loads the graph in a model server. `--no-smart-context` leaves it unloaded. `llama-cli` accepts the same flags and copies them into the `llama-server` it starts, so a terminal chat uses the graph too. `--server-base` connects to a server that is already running; the graph follows that server.
 
 Related flags:
 

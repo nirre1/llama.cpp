@@ -437,6 +437,10 @@ int cli_context::run() {
     if (!params.system_prompt.empty()) {
         banner += "using custom system prompt\n";
     }
+    if (params.smart_context && params.server_base.empty()) {
+        const std::string file = params.smart_context_file.empty() ? "data/context_graph.dat" : params.smart_context_file;
+        banner += "smart context : on, " + file + "\n";
+    }
     banner += "\n";
     banner += "available commands:\n";
     banner += "  /exit or Ctrl+C     stop or exit\n";

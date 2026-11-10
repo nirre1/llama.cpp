@@ -21,7 +21,7 @@
 
 ## Smart Context
 
-I built **Smart Context** for `llama-server`. It is a memory graph on disk. The model can use earlier turns without sending the whole chat back through the GPU.
+I built **Smart Context** for `llama-server` and `llama-cli`. It is a memory graph on disk. The model can use earlier turns without sending the whole chat back through the GPU.
 
 That is the point on an older card, or any card with little VRAM. Reading the prompt is the slow part. Every token in the prompt is processed into the KV cache before the first new token appears. A long history means that read happens again on every question, and the cache itself fills the card. An 8 GB GPU can run out of room, or just sit there chewing through context, before it answers.
 
@@ -31,9 +31,12 @@ A normal build of my fork includes it. It stays off until you turn it on, so a p
 
 ```sh
 llama-server -m model.gguf --smart-context
+llama-cli -m model.gguf --smart-context
 ```
 
-On each `/v1/chat/completions` request the server then:
+`llama-cli` starts a local server and sends the terminal chat through the same path, so the flag works there too. `--server-base` talks to a server that is already running, and the graph follows that server.
+
+On each chat the server then:
 
 1. Uses the latest user message as the query.
 2. Opens the matching part of the graph, capped by `--smart-context-budget` (default 480 words).
