@@ -19,17 +19,23 @@
 
 ## Smart Context
 
-This fork, by [nirre1](https://github.com/nirre1), adds **Smart Context** to `llama-server`.
+This fork, by [nirre1](https://github.com/nirre1), adds **Smart Context** to `llama-server`. It keeps past chat turns in a local graph and feeds the relevant ones back in as memory.
 
-Before a chat reply, it opens the saved notes that match the question and places a short slice in front of the user message. After a successful reply, it stores that turn in a local graph file. With Smart Context left off, llama.cpp behaves as usual.
-
-It is included when you build this fork. Turn it on when you start the server:
+A normal build includes it. The server still behaves like upstream llama.cpp until you turn it on:
 
 ```sh
 llama-server -m model.gguf --smart-context
 ```
 
-`--no-smart-context` turns it off. `--smart-context-file PATH` chooses the graph file. One request can skip it with `"smart_context": false`.
+On each chat completion the server then:
+
+1. Takes the latest user message and looks up related notes in the graph.
+2. Places a short matching slice in front of that message, then runs the model. The original message is what gets saved.
+3. After a successful reply, stores the user message and the assistant reply in the graph file.
+
+That file survives a restart. It defaults to `data/context_graph.dat` (`--smart-context-file PATH`). The slice is capped at 480 words (`--smart-context-budget N`). One request can skip lookup and storage with `"smart_context": false`.
+
+Only `/v1/chat/completions` uses the graph. The rest of the server is unchanged.
 
 More detail is in [common/smart-context/ARCHITECTURE.md](common/smart-context/ARCHITECTURE.md).
 
