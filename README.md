@@ -17,6 +17,22 @@
 
 </div>
 
+## Smart Context
+
+This fork, by [nirre1](https://github.com/nirre1), adds **Smart Context** to `llama-server`.
+
+Before a chat reply, it opens the saved notes that match the question and places a short slice in front of the user message. After a successful reply, it stores that turn in a local graph file. With Smart Context left off, llama.cpp behaves as usual.
+
+It is included when you build this fork. Turn it on when you start the server:
+
+```sh
+llama-server -m model.gguf --smart-context
+```
+
+`--no-smart-context` turns it off. `--smart-context-file PATH` chooses the graph file. One request can skip it with `"smart_context": false`.
+
+More detail is in [common/smart-context/ARCHITECTURE.md](common/smart-context/ARCHITECTURE.md).
+
 ## Quick start
 
 A few options to get `llama.cpp` installed on your machine:

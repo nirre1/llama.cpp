@@ -702,6 +702,11 @@ struct common_params {
     bool endpoint_props   = false; // only control POST requests, not GET
     bool endpoint_metrics = false;
 
+    // Smart Context. This fork compiles it in by default. Off until --smart-context.
+    bool        smart_context        = false;
+    std::string smart_context_file;          // empty selects data/context_graph.dat
+    int32_t     smart_context_budget = 480;  // words opened per question
+
     // enable built-in tools
     std::vector<std::string> server_tools;
     std::string server_tools_runtime;

@@ -133,6 +133,8 @@ option(LLAMA_BUILD_TESTS     "llama: build tests"                               
 option(LLAMA_BUILD_TOOLS     "llama: build tools"                                                                ${LLAMA_STANDALONE})
 option(LLAMA_BUILD_EXAMPLES  "llama: build examples"                                                             ${LLAMA_STANDALONE})
 option(LLAMA_BUILD_SERVER    "llama: build server example"                                                       ${LLAMA_STANDALONE})
+# This fork installs Smart Context with llama-server. -DLLAMA_SMART_CONTEXT=OFF leaves it out.
+option(LLAMA_SMART_CONTEXT   "llama: graph-based Smart Context in llama-server (installed with this fork)"       ON)
 option(LLAMA_BUILD_APP       "llama: build the unified binary"                                                   ${LLAMA_STANDALONE})
 option(LLAMA_BUILD_UI        "llama: build the embedded Web UI for server"                                       OFF)
 option(LLAMA_USE_PREBUILT_UI "llama: use prebuilt UI from HF Bucket when available" ON)

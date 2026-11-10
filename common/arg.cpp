@@ -3624,6 +3624,30 @@ common_params_context common_params_parser_init(common_params & params, llama_ex
             params.endpoint_metrics = true;
         }
     ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_ENDPOINT_METRICS"));
+#ifdef LLAMA_SMART_CONTEXT
+    add_opt(common_arg(
+        {"--smart-context"},
+        {"--no-smart-context"},
+        string_format("graph-based Smart Context on chat completions (default: %s)", params.smart_context ? "enabled" : "disabled"),
+        [](common_params & params, bool value) {
+            params.smart_context = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SMART_CONTEXT"));
+    add_opt(common_arg(
+        {"--smart-context-file"}, "PATH",
+        "Smart Context graph file (default: data/context_graph.dat)",
+        [](common_params & params, const std::string & value) {
+            params.smart_context_file = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SMART_CONTEXT_FILE"));
+    add_opt(common_arg(
+        {"--smart-context-budget"}, "N",
+        string_format("Smart Context word budget per question (default: %d)", params.smart_context_budget),
+        [](common_params & params, int value) {
+            params.smart_context_budget = value;
+        }
+    ).set_examples({LLAMA_EXAMPLE_SERVER}).set_env("LLAMA_ARG_SMART_CONTEXT_BUDGET"));
+#endif
     add_opt(common_arg(
         {"--props"},
         string_format("enable changing global properties via POST /props (default: %s)", params.endpoint_props ? "enabled" : "disabled"),

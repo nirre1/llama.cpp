@@ -19,6 +19,7 @@
 #include "log.h"
 #include "sampling.h"
 #include "speculative.h"
+#include "smart-context/smart_context.h"
 #include "mtmd.h"
 #include "mtmd-helper.h"
 #include "base64.hpp"
@@ -5328,13 +5329,100 @@ void server_context::set_state_callback(server_state_callback_t callback) {
 // server_routes
 //
 
+static std::string smart_context_message_text(const json & content) {
+    if (content.is_string()) {
+        return content.get<std::string>();
+    }
+    if (!content.is_array()) {
+        return {};
+    }
+
+    std::string text;
+    for (const auto & part : content) {
+        if (part.is_string()) {
+            if (!text.empty()) {
+                text.push_back('\n');
+            }
+            text += part.get<std::string>();
+            continue;
+        }
+        if (!part.is_object()) {
+            continue;
+        }
+        const std::string type = json_value(part, "type", std::string());
+        if (!type.empty() && type != "text") {
+            continue;
+        }
+        if (!part.contains("text") || !part.at("text").is_string()) {
+            continue;
+        }
+        if (!text.empty()) {
+            text.push_back('\n');
+        }
+        text += part.at("text").get<std::string>();
+    }
+    return text;
+}
+
+// Query the graph and attach the slice to the last user message.
+// Returns the original user text, which is what gets stored after inference.
+// "smart_context": false skips this call. The key is always removed so it is
+// not forwarded as a sampling parameter.
+static std::string smart_context_prepare_chat(json & body) {
+    bool allow = true;
+    if (body.contains("smart_context") && body.at("smart_context").is_boolean()) {
+        allow = body.at("smart_context").get<bool>();
+    }
+    body.erase("smart_context");
+
+    if (!allow || !smart_context_enabled() || !body.contains("messages") || !body.at("messages").is_array()) {
+        return {};
+    }
+
+    json & messages = body.at("messages");
+    for (size_t i = messages.size(); i-- > 0; ) {
+        json & msg = messages.at(i);
+        if (json_value(msg, "role", std::string()) != "user" || !msg.contains("content")) {
+            continue;
+        }
+
+        json & content = msg.at("content");
+        const std::string original = smart_context_message_text(content);
+        if (original.empty()) {
+            return {};
+        }
+
+        const std::string prefix = smart_context_prefix(original);
+        if (!prefix.empty()) {
+            if (content.is_string()) {
+                content = prefix + original;
+            } else if (content.is_array()) {
+                json prefixed = json::array();
+                prefixed.push_back({
+                    {"type", "text"},
+                    {"text", prefix},
+                });
+                for (const auto & part : content) {
+                    prefixed.push_back(part);
+                }
+                content = std::move(prefixed);
+            }
+            SRV_INF("smart context attached %zu bytes in front of the user message\n", prefix.size());
+        }
+        return original;
+    }
+
+    return {};
+}
+
 std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             const server_http_req & req,
             server_task_type type,
             const json & data,
             const std::vector<raw_buffer> & files,
             task_response_type res_type,
-            const common_chat_session & chat_session) {
+            const common_chat_session & chat_session,
+            const std::string & smart_context_user) {
     GGML_ASSERT(type == SERVER_TASK_TYPE_COMPLETION || type == SERVER_TASK_TYPE_INFILL);
 
     auto res = create_response();
@@ -5422,6 +5510,33 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
 
     bool stream = json_value(data, "stream", false);
 
+    // One stored turn per request. Partial chunks are ignored; the final
+    // assistant message is written after generation succeeds.
+    struct smart_turn_state {
+        std::string user;
+        bool stored = false;
+    };
+    auto smart_turn = std::make_shared<smart_turn_state>();
+    smart_turn->user = smart_context_user;
+    auto store_smart_turn = [smart_turn](server_task_result * result) {
+        if (smart_turn->stored || smart_turn->user.empty() || result == nullptr || !smart_context_enabled()) {
+            return;
+        }
+        auto * final_result = dynamic_cast<server_task_result_cmpl_final *>(result);
+        if (final_result == nullptr || final_result->res_type != TASK_RESPONSE_TYPE_OAI_CHAT) {
+            return;
+        }
+        std::string assistant = final_result->oaicompat_msg.content;
+        if (assistant.empty()) {
+            assistant = final_result->content.text;
+        }
+        if (assistant.empty()) {
+            return;
+        }
+        smart_context_store(smart_turn->user, assistant);
+        smart_turn->stored = true;
+    };
+
     if (!stream) {
         // non-stream, wait for the results
         auto all_results = rd.wait_for_all(req.should_stop);
@@ -5434,6 +5549,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
             json arr = json::array();
             for (auto & res : all_results.results) {
                 GGML_ASSERT(dynamic_cast<server_task_result_cmpl_final*>(res.get()) != nullptr);
+                store_smart_turn(res.get());
                 arr.push_back(res->to_json());
             }
             GGML_ASSERT(!arr.empty() && "empty results");
@@ -5484,6 +5600,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
 
         // next responses are streamed
         // to be sent immediately
+        store_smart_turn(first_result.get());
         json first_result_json = first_result->to_json();
         if (first_result_json == nullptr) {
             res->data = ""; // simply send HTTP headers and status code
@@ -5496,7 +5613,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
         }
         res->status = 200;
         res->content_type = "text/event-stream";
-        res->set_next([res_this = res.get(), res_type, sse_ping_interval](std::string & output) -> bool {
+        res->set_next([res_this = res.get(), res_type, sse_ping_interval, store_smart_turn](std::string & output) -> bool {
             static auto format_error = [](task_response_type res_type, const json & res_json) {
                 if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
                     return format_anthropic_sse({
@@ -5581,6 +5698,7 @@ std::unique_ptr<server_res_generator> server_routes::handle_completions_impl(
                         dynamic_cast<server_task_result_cmpl_partial*>(result.get()) != nullptr
                         || dynamic_cast<server_task_result_cmpl_final*>(result.get()) != nullptr
                     );
+                    store_smart_turn(result.get());
                     json res_json = result->to_json();
                     if (res_type == TASK_RESPONSE_TYPE_ANTHROPIC) {
                         output = format_anthropic_sse(res_json);
@@ -5617,6 +5735,12 @@ server_routes::server_routes(const common_params & params, server_context & ctx_
           queue_tasks(ctx_server.impl->queue_tasks),
           queue_results(ctx_server.impl->queue_results) {
     init_routes();
+
+    // The router proxies chat and has no model. Only the model process opens the graph,
+    // so two processes do not rewrite the same file.
+    if (params.smart_context && !params.model.path.empty()) {
+        smart_context_configure(params.smart_context_file, params.smart_context_budget);
+    }
 
     // note: this must be registered before load_model()
     //       so that on sleep phase, the callback is called before ctx is destroyed
@@ -6028,6 +6152,7 @@ void server_routes::init_routes() {
         auto res = create_response();
         std::vector<raw_buffer> files;
         json body = json::parse(req.body);
+        const std::string smart_user = smart_context_prepare_chat(body);
         common_chat_session session;
         json body_parsed = oaicompat_chat_params_parse(
             ctx_server.vocab,
@@ -6041,7 +6166,8 @@ void server_routes::init_routes() {
             body_parsed,
             files,
             TASK_RESPONSE_TYPE_OAI_CHAT,
-            session);
+            session,
+            smart_user);
     };
 
     this->post_chat_completions_tok = [this](const server_http_req & req) {

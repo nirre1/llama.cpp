@@ -424,6 +424,11 @@ if (NOT LLAMA_USE_SYSTEM_GGML)
     llama_build_and_test(test-alloc.cpp  LABEL "behavior backend"  LINK ggml)
 endif()
 
+if (LLAMA_SMART_CONTEXT)
+    llama_build_and_test(test-smart-context.cpp LABEL behavior)
+    target_include_directories(test-smart-context PRIVATE ${PROJECT_SOURCE_DIR}/common/smart-context)
+endif()
+
 llama_build(test-export-graph-ops.cpp)
 if (TARGET gguf-model-data)
     target_link_libraries(test-export-graph-ops PRIVATE gguf-model-data)

@@ -129,6 +129,14 @@ add_library(${TARGET}
     jinja/caps.h
     )
 
+if (LLAMA_SMART_CONTEXT)
+    target_sources(${TARGET} PRIVATE
+        smart-context/context_graph.cpp
+        smart-context/smart_context.cpp
+    )
+    target_compile_definitions(${TARGET} PUBLIC LLAMA_SMART_CONTEXT)
+endif()
+
 set_target_properties(${TARGET} PROPERTIES
     VERSION ${LLAMA_VERSION_BASE}
     SOVERSION ${LLAMA_VERSION_MAJOR}
