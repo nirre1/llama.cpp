@@ -1,5 +1,7 @@
 # llama.cpp
 
+**[nirre1](https://github.com/nirre1) / llama.cpp** — my fork. Same llama.cpp, plus [Smart Context](#smart-context).
+
 ![llama](https://raw.githubusercontent.com/ggml-org/llama.brand/refs/heads/master/cover/llama-cpp/cover-llama-cpp-dark.svg)
 
 <div align="center">
@@ -19,23 +21,26 @@
 
 ## Smart Context
 
-This fork, by [nirre1](https://github.com/nirre1), adds **Smart Context** to `llama-server`. It keeps past chat turns in a local graph and feeds the relevant ones back in as memory.
+I built **Smart Context** for `llama-server`. It is a memory graph on disk. The model can use earlier turns without sending the whole chat back through the GPU.
 
-A normal build includes it. The server still behaves like upstream llama.cpp until you turn it on:
+That is the point on an older card, or any card with little VRAM. Reading the prompt is the slow part. Every token in the prompt is processed into the KV cache before the first new token appears. A long history means that read happens again on every question, and the cache itself fills the card. An 8 GB GPU can run out of room, or just sit there chewing through context, before it answers.
+
+Smart Context stores each finished turn in a local graph. The next question opens only the notes that match. A short slice, 480 words by default, is placed in front of the user message. Unrelated topics stay closed. The model still sees the history that matters. It does not reread everything you ever said. Less prompt, less KV cache, and a faster time to the first token. The file is still there after a restart.
+
+A normal build of my fork includes it. It stays off until you turn it on, so a plain run is unchanged:
 
 ```sh
 llama-server -m model.gguf --smart-context
 ```
 
-On each chat completion the server then:
+On each `/v1/chat/completions` request the server then:
 
-1. Takes the latest user message and looks up related notes in the graph.
-2. Places a short matching slice in front of that message, then runs the model. The original message is what gets saved.
-3. After a successful reply, stores the user message and the assistant reply in the graph file.
+1. Uses the latest user message as the query.
+2. Opens the matching part of the graph, capped by `--smart-context-budget` (default 480 words).
+3. Puts that slice in front of the message and runs the model. The original message is what gets saved.
+4. After a successful reply, writes the user message and the assistant reply to `data/context_graph.dat` (`--smart-context-file PATH`).
 
-That file survives a restart. It defaults to `data/context_graph.dat` (`--smart-context-file PATH`). The slice is capped at 480 words (`--smart-context-budget N`). One request can skip lookup and storage with `"smart_context": false`.
-
-Only `/v1/chat/completions` uses the graph. The rest of the server is unchanged.
+One request can skip it with `"smart_context": false`. A failed or cancelled reply is not stored. Other endpoints are unchanged.
 
 More detail is in [common/smart-context/ARCHITECTURE.md](common/smart-context/ARCHITECTURE.md).
 
